@@ -1,11 +1,13 @@
 // A Chao Thao
-// Sprint 4
-// 11/11/2024
+// Sprint 5
+// 12/1/2024
 
 #ifndef SOSGAME_H
 #define SOSGAME_H
 
 #include <wx/wx.h>
+#include <fstream> 
+#include <string>  
 #include "SimpleGame.h"
 #include "GeneralGame.h"
 
@@ -35,6 +37,17 @@ private:
     wxRadioButton* redPlayerS;
     wxRadioButton* redPlayerO;
 
+    // Recording Game and Replaying Game features
+    wxButton* recordGameButton;
+    wxButton* replayGameButton;
+    bool recordingEnabled;
+    ofstream recordFile; // File for recording moves
+    void OnRecordGame(wxCommandEvent& event);
+    void OnReplayGame(wxCommandEvent& event);
+    void ReplayMove(const string& playerType, const string& color, char moveType, int row, int col);
+    string GetPlayerType() const;
+    string GetPlayerColor() const;
+
     wxChoice* boardSizeChoice; // Choose Board Size
     wxStaticText* currentTurn; // Display player turn
     wxButton* newGameButton; // Start a New Game
@@ -46,14 +59,13 @@ private:
     int currentPlayer;
     int bluePlayerSOSCount;
     int redPlayerSOSCount;
-
     void CreateBoard(int size);
     void OnCellClicked(wxMouseEvent& event);
     void OnNewGame();
     void UpdateCurrentTurn();
     void UpdatePointsDisplay();
     void ResetPlayerSelections();
-    void ComputerMove(); // Function for computer
+    void ComputerMove();
     bool SimpleGameMode() const;
     bool GeneralGameMode() const;
 
