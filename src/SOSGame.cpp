@@ -1,9 +1,13 @@
 // A Chao Thao
-// Sprint 4
-// 11/11/2024
+// Sprint 5
+// 12/1/2024
 
 #include "SOSGame.h"
 #include <algorithm>
+#include <iostream>
+#include <sstream> // For std::istringstream
+
+
 
 wxBEGIN_EVENT_TABLE(SOSGame, wxFrame)
 EVT_LEFT_DOWN(SOSGame::OnCellClicked)
@@ -45,6 +49,12 @@ SOSGame::SOSGame(const wxString& sosgame)
     redPlayerS = new wxRadioButton(panel, wxID_ANY, "S", wxPoint(600, 100), wxDefaultSize, wxRB_GROUP);
     redPlayerO = new wxRadioButton(panel, wxID_ANY, "O", wxPoint(600, 120));
 
+    // Record and Replay Components
+    recordGameButton = new wxButton(panel, wxID_ANY, "Record Game", wxPoint(10, 330));
+    recordGameButton->Bind(wxEVT_BUTTON, &SOSGame::OnRecordGame, this);
+    replayGameButton = new wxButton(panel, wxID_ANY, "Replay", wxPoint(580, 300));
+    replayGameButton->Bind(wxEVT_BUTTON, &SOSGame::OnReplayGame, this);
+
     bluePlayerPoints = new wxStaticText(panel, wxID_ANY, "Blue Points: 0", wxPoint(10, 180), wxDefaultSize, wxALIGN_LEFT);
     redPlayerPoints = new wxStaticText(panel, wxID_ANY, "Red Points: 0", wxPoint(580, 180), wxDefaultSize, wxALIGN_LEFT);
 
@@ -58,6 +68,7 @@ SOSGame::SOSGame(const wxString& sosgame)
 
     boardSizeChoice->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { OnNewGame(); });
 }
+
 
 // Check to see if the player select simple game mode
 bool SOSGame::SimpleGameMode() const
@@ -120,10 +131,29 @@ void SOSGame::OnCellClicked(wxMouseEvent& event)
 
     char move = (currentPlayer == 0) ? (bluePlayerS->GetValue() ? 'S' : 'O') : (redPlayerS->GetValue() ? 'S' : 'O');
 
+    // Get the player type information for the record file.
+    const string playerType = (currentPlayer == 0 && bluePlayerHuman->GetValue()) ||
+        (currentPlayer == 1 && redPlayerHuman->GetValue()) ? "Human" : "Computer";
+    const string color = (currentPlayer == 0) ? "Blue" : "Red";
+
     if (gameLogic->PlaceMove(row, col, move))
     {
         wxStaticText* moveText = new wxStaticText(cell, wxID_ANY, wxString::Format("%c", move), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+        const string playerType = (currentPlayer == 0 && bluePlayerHuman->GetValue()) || 
+                                   (currentPlayer == 1 && redPlayerHuman->GetValue()) ? "Human" : "Computer";
+        const string color = (currentPlayer == 0) ? "Blue" : "Red";
+        moveText->SetForegroundColour(currentPlayer == 0 ? *wxBLUE : *wxRED);
 
+        // This file will be created after the game had been record it.
+        // This file is save in the project folder.
+        if (recordingEnabled && recordFile.is_open())
+        {
+            recordFile << "PlayerType: " << playerType << ", "
+                << "Color: " << color << ", "
+                << "MoveType: " << move << ", "
+                << "Row: " << row << ", "
+                << "Col: " << col << "\n";
+        }
         if (currentPlayer == 0) {
             moveText->SetForegroundColour(*wxBLUE);
         }
@@ -206,6 +236,137 @@ void SOSGame::OnCellClicked(wxMouseEvent& event)
     }
 }
 
+// A message will pop up before and after game record.
+void SOSGame::OnRecordGame(wxCommandEvent& event)
+{
+    if (recordingEnabled) {
+        recordingEnabled = false;
+        recordFile.close();
+        wxMessageBox("Game recording stopped!", "Recording", wxOK | wxICON_INFORMATION);
+    }
+    else {
+        recordFile.open("recorded_game.txt", ios::out | ios::trunc);
+        if (!recordFile.is_open()) {
+            wxMessageBox("Failed to open file for recording!", "Error", wxOK | wxICON_ERROR);
+            return;
+        }
+        recordingEnabled = true;
+        wxMessageBox("Game recording started!", "Recording", wxOK | wxICON_INFORMATION);
+    }
+}
+
+// Replay the previous game
+void SOSGame::ReplayMove(const string& playerType, const string& color, char moveType, int row, int col)
+{
+    // Determine the current player based on color
+    currentPlayer = (color == "Blue") ? 0 : 1;
+
+    // Place the move in the game logic
+    gameLogic->PlaceMove(row, col, moveType);
+
+    // Update the UI
+    wxPanel* cell = cells[row * gameLogic->GetBoardSize() + col];
+    wxStaticText* moveText = new wxStaticText(cell, wxID_ANY, wxString::Format("%c", moveType), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+    moveText->SetForegroundColour(currentPlayer == 0 ? *wxBLUE : *wxRED);
+
+    // Check for SOS formations and update points
+    vector<pair<int, int>> sosCells;
+    if (gameLogic->CheckForSOS(row, col, moveType, sosCells)) {
+        if (currentPlayer == 0) {
+            ++bluePlayerSOSCount;
+        }
+        else {
+            ++redPlayerSOSCount;
+        }
+
+        UpdatePointsDisplay();
+
+        // Draw SOS lines
+        wxColour lineColor = (currentPlayer == 0) ? *wxBLUE : *wxRED;
+        for (const auto& cellCoord : sosCells) {
+            int cellIndex = cellCoord.first * gameLogic->GetBoardSize() + cellCoord.second;
+            wxPanel* sosCell = cells[cellIndex];
+            wxClientDC dc(sosCell);
+            dc.SetPen(wxPen(lineColor, 2));
+
+            // Draw appropriate lines based on SOS formation
+            if (sosCells[0].first == sosCells[2].first) {
+                dc.DrawLine(0, sosCell->GetSize().GetHeight() / 2, sosCell->GetSize().GetWidth(), sosCell->GetSize().GetHeight() / 2);
+            }
+            else if (sosCells[0].second == sosCells[2].second) {
+                dc.DrawLine(sosCell->GetSize().GetWidth() / 2, 0, sosCell->GetSize().GetWidth() / 2, sosCell->GetSize().GetHeight());
+            }
+            else if (sosCells[0].first < sosCells[2].first && sosCells[0].second < sosCells[2].second) {
+                dc.DrawLine(0, 0, sosCell->GetSize().GetWidth(), sosCell->GetSize().GetHeight());
+            }
+            else if (sosCells[0].first < sosCells[2].first && sosCells[0].second > sosCells[2].second) {
+                dc.DrawLine(sosCell->GetSize().GetWidth(), 0, 0, sosCell->GetSize().GetHeight());
+            }
+        }
+    }
+
+    // Update the turn display
+    UpdateCurrentTurn();
+}
+
+
+void SOSGame::OnReplayGame(wxCommandEvent& event)
+{
+    ifstream replayFile("recorded_game.txt");
+    if (!replayFile.is_open()) {
+        wxMessageBox("No recorded game found!", "Error", wxOK | wxICON_ERROR);
+        return;
+    }
+
+    OnNewGame(); // Reset the game
+
+    string line;
+    while (getline(replayFile, line)) {
+        istringstream iss(line);
+
+        string playerType, color;
+        char moveType;
+        int row, col;
+
+        // Parse the recorded line
+        string key, value;
+        while (iss >> key >> value) {
+            if (key == "PlayerType:") {
+                playerType = value;
+            }
+            else if (key == "Color:") {
+                color = value;
+            }
+            else if (key == "MoveType:") {
+                moveType = value[0]; 
+            }
+            else if (key == "Row:") {
+                row = stoi(value);
+            }
+            else if (key == "Col:") {
+                col = stoi(value);
+            }
+        }
+
+        ReplayMove(playerType, color, moveType, row, col);
+    }
+
+    replayFile.close();
+    wxMessageBox("Replay complete!", "Replay", wxOK | wxICON_INFORMATION);
+}
+
+string SOSGame::GetPlayerType() const
+{
+    return (currentPlayer == 0) ?
+        (bluePlayerHuman->GetValue() ? "Human" : "Computer") :
+        (redPlayerHuman->GetValue() ? "Human" : "Computer");
+}
+
+string SOSGame::GetPlayerColor() const
+{
+    return currentPlayer == 0 ? "Blue" : "Red";
+}
+
 // This Function get call when Blue player or Red player choose computer
 void SOSGame::ComputerMove()
 {
@@ -221,6 +382,7 @@ void SOSGame::ComputerMove()
     // Gather all empty cells
     int boardSize = gameLogic->GetBoardSize();
     vector<pair<int, int>> emptyCells;
+
     for (int row = 0; row < boardSize; ++row) {
         for (int col = 0; col < boardSize; ++col) {
             if (!gameLogic->IsCellOccupied(row, col)) {
@@ -243,6 +405,17 @@ void SOSGame::ComputerMove()
         wxPanel* cell = cells[row * boardSize + col];
         wxStaticText* moveText = new wxStaticText(cell, wxID_ANY, wxString::Format("%c", move), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
         moveText->SetForegroundColour(currentPlayer == 0 ? *wxBLUE : *wxRED);
+
+        // Record the computer's move
+        if (recordingEnabled && recordFile.is_open()) {
+            const string playerType = "Computer";
+            const string color = (currentPlayer == 0) ? "Blue" : "Red";
+            recordFile << "PlayerType: " << playerType << ", "
+                << "Color: " << color << ", "
+                << "MoveType: " << move << ", "
+                << "Row: " << row << ", "
+                << "Col: " << col << "\n";
+        }
 
         vector<pair<int, int>> sosCells;
         if (gameLogic->CheckForSOS(row, col, move, sosCells))
